@@ -12,6 +12,7 @@ namespace JunkiesSoftware
         {
             if (string.IsNullOrEmpty(authToken))
             {
+                
                 // Build the request body
                 var requestBody = new
                 {
