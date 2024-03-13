@@ -12,7 +12,7 @@ namespace JunkiesSoftware
         {
             if (string.IsNullOrEmpty(authToken))
             {
-                
+
                 // Build the request body
                 var requestBody = new
                 {
@@ -42,7 +42,7 @@ namespace JunkiesSoftware
 
         public static async Task<string> MakeAuthenticatedRequestAsync(string apiUrl, HttpMethod method, string jsonBody = null)
         {
-            string token = await GetAuthTokenAsync("9c180049-45a1-4533-a4b8-5e82632e8ad5", "secret");
+            string token = await GetAuthTokenAsync("", "");
 
             // Add JWT token to request headers
             httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
