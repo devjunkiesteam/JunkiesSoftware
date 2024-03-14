@@ -1,113 +1,97 @@
+using System.Text.Json;
+using JunkiesSoftware.Models;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace JunkiesSoftware;
 
 public partial class UpdateAccountStatusFunction
 {
-    private static readonly HttpClient httpClient = new HttpClient();
-    private readonly ILogger<UpdateAccountStatusFunction> _logger;
+    private readonly IConfiguration _configuration;
+    private readonly IHttpClientFactory _httpClientFactory;
+   private readonly string _clientEndpoint;
 
-    public UpdateAccountStatusFunction(ILogger<UpdateAccountStatusFunction> logger)
+    public UpdateAccountStatusFunction(IConfiguration configuration, IHttpClientFactory httpClientFactory)
     {
-        _logger = logger;
+        _configuration = configuration;
+        _httpClientFactory = httpClientFactory;
+         _clientEndpoint = _configuration["SmartcreditEndpoint"];
+        
     }
 
-    [Function("UpdateAccountStatus")]
-    public async Task<IActionResult> Run([HttpTrigger(AuthorizationLevel.Function, "get", "post")] HttpRequest req)
+    [Function("ProcessGoHighLevelRequest")]
+    public async Task<HttpResponseData> RunAsync(
+        [HttpTrigger(AuthorizationLevel.Function, "post", Route = null)] HttpRequestData req,
+        FunctionContext context)
     {
-         _logger.LogInformation("C# HTTP trigger function processed a request.");
+        var logger = context.GetLogger("ProcessGoHighLevelRequest");
 
-            // Parse query parameters
-            string emailAddress = req.Query["email"];
+        // Step 1: Retrieve data from the request
+        var requestBody = await new StreamReader(req.Body).ReadToEndAsync();
+        var requestData = JsonSerializer.Deserialize<GoHighLevelRequest>(requestBody);
 
-            // Validate parameters
-            if (string.IsNullOrEmpty(emailAddress))
-            {
-                return new BadRequestObjectResult("Please provide an email address.");
-            }
+        // Step 2: Acquire token from SmartCredit
+        var token = await AcquireTokenAsync();
 
-            try
-            {
-                // Retrieve customer account information based on email address
-                var customer = await RetrieveCustomerByEmail(emailAddress);
+        // Step 3: Retrieve client with their email address
+        var client = await RetrieveClientAsync(requestData.EmailAddress, token);
 
-                if (customer != null)
-                {
-                    // Extract customer token
-                    string customerToken = customer.CustomerToken;
+        // Step 4: Update customer status with SmartCredit API
+        var response = await UpdateCustomerStatusAsync(client.CustomerToken, requestData.Status, token);
 
-                    // Update account status using customer token
-                    string status = req.Query["status"];
-                    string response = await UpdateAccountStatus(customerToken, status);
+        // Step 5: Return the response body
+        var responseContent = JsonSerializer.Deserialize<SmartCreditResponse>(response);
 
-                    return new OkObjectResult(response);
-                }
-                else
-                {
-                    return new NotFoundObjectResult("Customer not found.");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error processing request: {ex.Message}");
-                return new StatusCodeResult(500);
-            }
+        var responseMessage = req.CreateResponse();
+        await responseMessage.WriteAsJsonAsync(responseContent);
+
+        return responseMessage;
     }
-    private static async Task<CustomerResponse> RetrieveCustomerByEmail(string emailAddress)
+
+   private async Task<string> AcquireTokenAsync()
+    {
+        // Replace dummy values with actual ClientKey and ClientSecret
+        var clientKey = _configuration["ClientKey"];
+        var clientSecret = _configuration["ClientSecret"];
+        
+        var httpClient = _httpClientFactory.CreateClient();
+        var tokenEndpoint = $"{_clientEndpoint}/login"; // Replace with actual token endpoint
+        var tokenResponse = await httpClient.PostAsync(tokenEndpoint, new FormUrlEncodedContent(new[]
         {
-            // Build the request URL
-            string apiUrl = $"https://stage-papi.consumerdirect.io/v1/customers?email={emailAddress}";
+            new KeyValuePair<string?, string?>("client_id", clientKey),
+            new KeyValuePair<string?, string?>("client_secret", clientSecret)
+        }));
 
-            // Make the GET request to retrieve customer information
-            HttpResponseMessage response = await httpClient.GetAsync(apiUrl);
+        tokenResponse.EnsureSuccessStatusCode();
+        return await tokenResponse.Content.ReadAsStringAsync();
+    }
 
-            if (response.IsSuccessStatusCode)
-            {
-                // Deserialize and return the response body
-                string responseBody = await response.Content.ReadAsStringAsync();
-                return Newtonsoft.Json.JsonConvert.DeserializeObject<CustomerResponse>(responseBody);
-            }
-            else if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                // Customer not found
-                return null;
-            }
-            else
-            {
-                // Handle other error cases
-                throw new Exception($"Failed to retrieve customer information: {response.StatusCode}");
-            }
-        }
+   private async Task<Client> RetrieveClientAsync(string emailAddress, string token)
+    {
+        var httpClient = _httpClientFactory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+        var clientEndpoint = $"{_clientEndpoint}/v1/customers?email={emailAddress}"; // Replace with actual client endpoint
+        var clientResponse = await httpClient.GetAsync(clientEndpoint);
 
-        private static async Task<string> UpdateAccountStatus(string customerToken, string status)
-        {
-            // Build the request URL
-            string apiUrl = "https://stage-pws.consumerdirect.app/customer/account/status";
+        clientResponse.EnsureSuccessStatusCode();
+        var clientData = await clientResponse.Content.ReadAsStringAsync();
+        return JsonSerializer.Deserialize<Client>(clientData);
+    }
 
-            // Build the request body
-            var requestBody = new
-            {
-                customerToken,
-                status
-            };
+    private async Task<string> UpdateCustomerStatusAsync(string customerToken, string status, string token)
+    {
+        var httpClient = _httpClientFactory.CreateClient();
+        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
+        var updateEndpoint = $"{_clientEndpoint}customer/account/status"; // Replace with actual update endpoint
+        var updateRequest = new UpdateRequest { Status = status };
+        var updateContent = new StringContent(JsonSerializer.Serialize(updateRequest), System.Text.Encoding.UTF8, "application/json");
+        var updateResponse = await httpClient.PutAsync($"{updateEndpoint}/{customerToken}", updateContent);
 
-            // Convert request body to JSON
-            string jsonBody = Newtonsoft.Json.JsonConvert.SerializeObject(requestBody);
-
-            // Make the PUT request to update account status
-            HttpResponseMessage response = await httpClient.PutAsync(apiUrl, new StringContent(jsonBody, System.Text.Encoding.UTF8, "application/json"));
-
-            if (response.IsSuccessStatusCode)
-            {
-                // Return the response body
-                return await response.Content.ReadAsStringAsync();
-            }
-            else
-            {
-                throw new Exception($"Failed to update account status: {response.StatusCode}");
-            }
-        }
+        updateResponse.EnsureSuccessStatusCode();
+        return await updateResponse.Content.ReadAsStringAsync();
+    }
 }

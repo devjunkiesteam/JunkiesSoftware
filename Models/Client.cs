@@ -1,7 +1,6 @@
 namespace JunkiesSoftware.Models;
 
-public class CustomerResponse
+public class Client
 {
     public string CustomerToken { get; set; }
-    // Add other properties as needed
 }
