@@ -1,26 +1,24 @@
 using System.Text.Json;
 using JunkiesSoftware.Models;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Logging;
 
 namespace JunkiesSoftware;
 
-public partial class UpdateAccountStatusFunction
+public class UpdateAccountStatusFunction
 {
     private readonly IConfiguration _configuration;
     private readonly IHttpClientFactory _httpClientFactory;
-   private readonly string _clientEndpoint;
+    private readonly string _clientEndpoint;
 
     public UpdateAccountStatusFunction(IConfiguration configuration, IHttpClientFactory httpClientFactory)
     {
         _configuration = configuration;
         _httpClientFactory = httpClientFactory;
-         _clientEndpoint = _configuration["SmartcreditEndpoint"];
-        
+        _clientEndpoint = _configuration["SmartcreditEndpoint"];
+
     }
 
     [Function("ProcessGoHighLevelRequest")]
@@ -52,25 +50,25 @@ public partial class UpdateAccountStatusFunction
         return responseMessage;
     }
 
-   private async Task<string> AcquireTokenAsync()
+    private async Task<string> AcquireTokenAsync()
     {
         // Replace dummy values with actual ClientKey and ClientSecret
         var clientKey = _configuration["ClientKey"];
         var clientSecret = _configuration["ClientSecret"];
-        
+
         var httpClient = _httpClientFactory.CreateClient();
         var tokenEndpoint = $"{_clientEndpoint}/login"; // Replace with actual token endpoint
         var tokenResponse = await httpClient.PostAsync(tokenEndpoint, new FormUrlEncodedContent(new[]
         {
-            new KeyValuePair<string?, string?>("client_id", clientKey),
-            new KeyValuePair<string?, string?>("client_secret", clientSecret)
+            new KeyValuePair<string, string>("client_id", clientKey),
+            new KeyValuePair<string, string>("client_secret", clientSecret)
         }));
 
         tokenResponse.EnsureSuccessStatusCode();
         return await tokenResponse.Content.ReadAsStringAsync();
     }
 
-   private async Task<Client> RetrieveClientAsync(string emailAddress, string token)
+    private async Task<Client> RetrieveClientAsync(string emailAddress, string token)
     {
         var httpClient = _httpClientFactory.CreateClient();
         httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
@@ -86,7 +84,7 @@ public partial class UpdateAccountStatusFunction
     {
         var httpClient = _httpClientFactory.CreateClient();
         httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
-        var updateEndpoint = $"{_clientEndpoint}customer/account/status"; // Replace with actual update endpoint
+        var updateEndpoint = $"{_clientEndpoint}customer/account/status"; // Replace with actual update endpoint with Prod Url
         var updateRequest = new UpdateRequest { Status = status };
         var updateContent = new StringContent(JsonSerializer.Serialize(updateRequest), System.Text.Encoding.UTF8, "application/json");
         var updateResponse = await httpClient.PutAsync($"{updateEndpoint}/{customerToken}", updateContent);
